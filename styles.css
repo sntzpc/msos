@@ -1,0 +1,203 @@
+:root{
+  --bg1:#f7fbff;
+  --bg2:#ffffff;
+  --ink:#0b1220;
+  --muted:#5b6474;
+  --brand:#0d6efd;
+  --brand2:#20c997;
+  --shadow: 0 10px 30px rgba(13,110,253,.12);
+}
+
+body{
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(13,110,253,.20), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(32,201,151,.18), transparent 55%),
+    linear-gradient(180deg, var(--bg1), var(--bg2));
+  color: var(--ink);
+}
+
+.topbar{
+  background: linear-gradient(90deg, rgba(13,110,253,.95), rgba(32,201,151,.92));
+  box-shadow: var(--shadow);
+}
+.brand-dot{
+  width:12px;height:12px;border-radius:999px;
+  background: rgba(255,255,255,.95);
+  box-shadow: 0 0 0 6px rgba(255,255,255,.15);
+}
+.pill{
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.25);
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #fff;
+}
+
+.hero{
+  position: relative;
+  overflow: hidden;
+}
+.glass{
+  background: rgba(255,255,255,.82);
+  backdrop-filter: blur(10px);
+}
+
+.badge-soft{
+  display:inline-flex;
+  gap:8px;
+  align-items:center;
+  padding:6px 12px;
+  border-radius:999px;
+  background: rgba(13,110,253,.10);
+  color: rgba(13,110,253,.95);
+  font-weight:600;
+}
+
+.alert-soft{
+  background: rgba(13,110,253,.08);
+  border: 1px dashed rgba(13,110,253,.25);
+  border-radius: 16px;
+}
+
+.stat-card{
+  background:#fff;
+  border: 1px solid rgba(13,110,253,.12);
+  border-radius: 18px;
+  padding: 14px 16px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.04);
+}
+
+.btn-white{
+  background:#fff;
+}
+
+.dot-online{
+  width:10px;height:10px;border-radius:999px;
+  background: #adb5bd;
+  box-shadow: 0 0 0 5px rgba(173,181,189,.18);
+}
+
+.masonry{
+  column-count: 1;
+  column-gap: 16px;
+}
+@media(min-width: 768px){
+  .masonry{ column-count: 2; }
+}
+@media(min-width: 1200px){
+  .masonry{ column-count: 3; }
+}
+
+.post-card{
+  break-inside: avoid;
+  margin: 0 0 16px;
+  border: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 10px 24px rgba(0,0,0,.06);
+  background:#fff;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.post-card:hover{
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0,0,0,.10);
+}
+
+.post-cover{
+  width:100%;
+  aspect-ratio: 16/10;
+  object-fit: cover;
+  background: #f1f5ff;
+}
+
+.post-body{
+  padding: 14px 16px 16px;
+}
+
+.tag{
+  font-size: .75rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(13,110,253,.10);
+  color: rgba(13,110,253,.95);
+  border: 1px solid rgba(13,110,253,.12);
+}
+
+.tag2{
+  background: rgba(32,201,151,.12);
+  color: rgba(32,201,151,.95);
+  border: 1px solid rgba(32,201,151,.18);
+}
+
+.empty-blob{
+  width: 110px; height: 110px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(13,110,253,.35), transparent 60%),
+    radial-gradient(circle at 70% 70%, rgba(32,201,151,.28), transparent 60%),
+    rgba(255,255,255,.9);
+  box-shadow: var(--shadow);
+}
+
+.media-preview{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+@media(min-width:992px){
+  .media-preview{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.preview-tile{
+  border-radius: 16px;
+  overflow:hidden;
+  border: 1px solid rgba(0,0,0,.08);
+  background:#fff;
+}
+.preview-tile img, .preview-tile video{
+  width:100%;
+  height:120px;
+  object-fit:cover;
+  display:block;
+}
+
+.media-stack{
+  display:grid;
+  gap: 12px;
+}
+.media-stack img, .media-stack video{
+  width:100%;
+  border-radius: 18px;
+  border: 1px solid rgba(0,0,0,.08);
+  background:#f8fbff;
+}
+
+.comment{
+  background:#fff;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 16px;
+  padding: 10px 12px;
+}
+.comment .meta{
+  font-size: .8rem;
+  color: var(--muted);
+}
+.comment-list{
+  display:grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow:auto;
+  padding-right: 4px;
+}
+
+.logbox{
+  height: 240px;
+  overflow:auto;
+  border-radius: 16px;
+  border: 1px solid rgba(13,110,253,.15);
+  background: rgba(255,255,255,.9);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: .85rem;
+  white-space: pre-wrap;
+}

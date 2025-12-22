@@ -1,0 +1,544 @@
+    <!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>TC Activity — Karyamas Plantation</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0d6efd">
+
+  <!-- Bootstrap 5 + Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Topbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark topbar sticky-top">
+    <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+        <span class="brand-dot"></span>
+        <div class="d-flex flex-column lh-sm">
+          <span class="fw-semibold">TC Activity</span>
+          <small class="opacity-75">Karyamas Plantation</small>
+        </div>
+      </a>
+
+      <div class="ms-auto d-flex align-items-center gap-2">
+        <div class="d-none d-md-flex align-items-center gap-2 pill">
+          <i class="bi bi-eye"></i>
+          <span class="small">Kunjungan:</span>
+          <span class="fw-semibold" id="visitTotal">—</span>
+        </div>
+
+        <button class="btn btn-light btn-sm rounded-pill" id="btnViewerName">
+          <i class="bi bi-person-badge"></i> Nama
+        </button>
+
+        <button class="btn btn-outline-light btn-sm rounded-pill" id="btnAdmin">
+          <i class="bi bi-shield-lock"></i> Admin
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="container py-4 py-md-5">
+      <div class="row align-items-center g-4">
+        <div class="col-12 col-lg-7">
+          <div class="badge-soft mb-2"><i class="bi bi-lightning-charge"></i> Offline-first • Sync Google Drive</div>
+          <h1 class="display-6 fw-bold mb-2">
+            Aktivitas Seriang Training Center
+          </h1>
+          <p class="lead text-muted mb-3">
+            Publik bisa melihat postingan & memberi komentar.
+          </p>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary rounded-pill px-4" id="btnRefresh">
+              <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+            <button class="btn btn-outline-primary rounded-pill px-4" id="btnOpenFeed">
+              <i class="bi bi-grid-1x2"></i> Timeline
+            </button>
+            <div class="ms-auto d-flex align-items-center gap-2 small text-muted">
+              <span class="dot-online" id="dotOnline"></span>
+              <span id="onlineText">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-5">
+          <div class="card glass rounded-4 border-0 shadow-sm">
+            <div class="card-body">
+              <div class="d-flex align-items-center justify-content-between">
+                <div>
+                  <div class="text-muted small">Status Sinkronisasi</div>
+                  <div class="fw-semibold" id="syncStatus">Belum</div>
+                </div>
+                <button class="btn btn-outline-primary btn-sm rounded-pill" id="btnSyncPublic">
+                  <i class="bi bi-cloud-arrow-up"></i> Sync
+                </button>
+              </div>
+
+              <hr class="my-3">
+
+              <div class="row g-2">
+                <div class="col-6">
+                  <div class="stat-card">
+                    <div class="text-muted small">Posting Publik</div>
+                    <div class="fs-4 fw-bold" id="statPosts">0</div>
+                  </div>
+                </div>
+                <div class="col-6">
+                  <div class="stat-card">
+                    <div class="text-muted small">Komentar</div>
+                    <div class="fs-4 fw-bold" id="statComments">0</div>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <div class="stat-card">
+                    <div class="d-flex align-items-center justify-content-between">
+                      <div>
+                        <div class="text-muted small">Antrian (offline)</div>
+                        <div class="fs-4 fw-bold" id="statQueue">0</div>
+                      </div>
+                      <div class="small text-muted text-end">
+                        <div>Drive: media</div>
+                        <div>Sheet: data</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-3 small text-muted">
+                <i class="bi bi-info-circle"></i> Pengunjung cukup isi nama untuk komentar.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="container pb-5">
+    <!-- Filters -->
+    <div class="d-flex flex-column flex-md-row gap-2 align-items-stretch align-items-md-center mb-3">
+      <div class="input-group input-group-lg shadow-sm rounded-4 overflow-hidden">
+        <span class="input-group-text bg-white border-0"><i class="bi bi-search"></i></span>
+        <input class="form-control border-0" id="q" placeholder="Cari judul, caption, tag…">
+        <button class="btn btn-white border-0" id="btnClearQ" title="Clear">
+          <i class="bi bi-x-circle"></i>
+        </button>
+      </div>
+
+      <div class="d-flex gap-2 ms-md-auto">
+        <button class="btn btn-outline-secondary rounded-pill" id="btnSort">
+          <i class="bi bi-sort-down"></i> Terbaru
+        </button>
+        <button class="btn btn-outline-secondary rounded-pill" id="btnOnlyFeatured">
+          <i class="bi bi-stars"></i> Highlight
+        </button>
+      </div>
+    </div>
+
+    <!-- Feed -->
+    <div id="feed" class="masonry"></div>
+
+    <!-- Empty -->
+    <div id="emptyState" class="text-center py-5 d-none">
+      <div class="empty-blob mx-auto mb-3"></div>
+      <h3 class="fw-bold">Belum ada postingan</h3>
+      <p class="text-muted">Admin dapat membuat postingan dari panel Admin.</p>
+    </div>
+  </main>
+
+  <!-- Viewer Name Modal -->
+  <div class="modal fade" id="viewerModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-person-badge"></i> Nama Pengunjung</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-soft mb-3">
+            Nama digunakan untuk komentar. Kunjungan tetap tercatat walau tanpa komentar.
+          </div>
+          <label class="form-label">Nama</label>
+          <input class="form-control form-control-lg" id="viewerNameInput" placeholder="Contoh: Andi">
+          <div class="form-text">Disimpan di perangkat Anda (localStorage).</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary rounded-pill" data-bs-dismiss="modal">Batal</button>
+          <button class="btn btn-primary rounded-pill" id="btnSaveViewerName">
+            Simpan
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Post Detail Modal -->
+  <div class="modal fade" id="postModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content rounded-4">
+        <div class="modal-header">
+          <div>
+            <div class="text-muted small" id="postMeta">—</div>
+            <h5 class="modal-title" id="postTitle">—</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="row g-4">
+            <div class="col-12 col-lg-7">
+              <div id="postMedia" class="media-stack"></div>
+            </div>
+            <div class="col-12 col-lg-5">
+              <div class="mb-2 text-muted small">Caption</div>
+              <div id="postCaption" class="mb-3"></div>
+
+              <div class="d-flex flex-wrap gap-2 mb-3" id="postTags"></div>
+
+              <hr>
+
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <div class="fw-semibold">Komentar</div>
+                <span class="badge text-bg-light" id="commentCount">0</span>
+              </div>
+
+              <div id="commentList" class="comment-list mb-3"></div>
+
+              <div class="card border-0 bg-light rounded-4">
+                <div class="card-body">
+                  <div class="fw-semibold mb-2"><i class="bi bi-chat-dots"></i> Tulis komentar</div>
+                  <div class="small text-muted mb-2">
+                    Nama: <span class="fw-semibold" id="viewerNameLabel">—</span>
+                    <button class="btn btn-link btn-sm p-0 ms-2" id="btnChangeNameInline">ubah</button>
+                  </div>
+                  <textarea class="form-control" id="commentText" rows="3" placeholder="Tulis komentar…"></textarea>
+                  <div class="d-flex justify-content-end mt-2">
+                    <button class="btn btn-primary rounded-pill" id="btnSendComment">
+                      <i class="bi bi-send"></i> Kirim
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-3 small text-muted">
+                Komentar akan tersimpan offline dan ikut tersinkron saat admin melakukan Sync.
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin Modal -->
+  <div class="modal fade" id="adminModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-shield-lock"></i> Admin Studio</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Admin Gate -->
+          <div id="adminGate" class="row g-3">
+            <div class="col-12 col-lg-5">
+              <div class="card border-0 shadow-sm rounded-4">
+                <div class="card-body">
+                  <h5 class="fw-bold mb-1">Login Admin</h5>
+                  <p class="text-muted mb-3">Default: admin</p>
+
+                  <label class="form-label">Username</label>
+                  <input class="form-control" id="adminUser" value="admin">
+
+                  <label class="form-label mt-2">Password</label>
+                  <input type="password" class="form-control" id="adminPass" value="123456">
+
+                  <div class="d-grid mt-3">
+                    <button class="btn btn-primary rounded-pill" id="btnAdminLogin">
+                      <i class="bi bi-box-arrow-in-right"></i> Login
+                    </button>
+                  </div>
+
+                  <div class="small text-muted mt-3">
+                    Password disimpan dalam bentuk hash (PBKDF2 + salt).
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12 col-lg-7">
+              <div class="card border-0 bg-light rounded-4">
+                <div class="card-body">
+                  <div class="fw-bold mb-2">Apa yang bisa admin lakukan?</div>
+                  <ul class="mb-0">
+                    <li>Membuat posting publik (foto/video) & highlight</li>
+                    <li>Membuat laporan kegiatan privat (tidak tampil publik)</li>
+                    <li>Moderasi komentar</li>
+                    <li>Sinkronisasi ke Google Drive + Google Sheets</li>
+                    <li>Melihat total kunjungan</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Admin Panel -->
+          <div id="adminPanel" class="d-none">
+            <ul class="nav nav-pills gap-2 mb-3">
+              <li class="nav-item">
+                <button class="nav-link active rounded-pill" data-bs-toggle="pill" data-bs-target="#tabCreatePost">
+                  <i class="bi bi-plus-circle"></i> Buat Post
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link rounded-pill" data-bs-toggle="pill" data-bs-target="#tabPrivateReport">
+                  <i class="bi bi-journal-text"></i> Laporan Privat
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link rounded-pill" data-bs-toggle="pill" data-bs-target="#tabModeration">
+                  <i class="bi bi-shield-check"></i> Moderasi
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link rounded-pill" data-bs-toggle="pill" data-bs-target="#tabSync">
+                  <i class="bi bi-cloud-check"></i> Sync
+                </button>
+              </li>
+              <li class="nav-item ms-auto">
+                <button class="btn btn-outline-danger rounded-pill btn-sm" id="btnAdminLogout">
+                  <i class="bi bi-box-arrow-right"></i> Logout
+                </button>
+              </li>
+            </ul>
+
+            <div class="tab-content">
+              <!-- Create Post -->
+              <div class="tab-pane fade show active" id="tabCreatePost">
+                <div class="card border-0 shadow-sm rounded-4">
+                  <div class="card-body">
+                    <div class="row g-3">
+                      <div class="col-12 col-lg-6">
+                        <label class="form-label">Judul</label>
+                        <input class="form-control" id="postTitleInput" placeholder="Contoh: Briefing Pagi & Safety Talk">
+
+                        <label class="form-label mt-2">Caption</label>
+                        <textarea class="form-control" id="postCaptionInput" rows="4" placeholder="Tulis ringkas tapi menarik…"></textarea>
+
+                        <div class="row g-2 mt-2">
+                          <div class="col-6">
+                            <label class="form-label">Tag (pisahkan koma)</label>
+                            <input class="form-control" id="postTagsInput" placeholder="training, inspeksi, safety">
+                          </div>
+                          <div class="col-6">
+                            <label class="form-label">Tanggal</label>
+                            <input type="datetime-local" class="form-control" id="postDateInput">
+                          </div>
+                        </div>
+
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                          <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="postPublished" checked>
+                            <label class="form-check-label" for="postPublished">Publish ke publik</label>
+                          </div>
+                          <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="postFeatured">
+                            <label class="form-check-label" for="postFeatured">Highlight</label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="col-12 col-lg-6">
+                        <label class="form-label">Media (Foto/Video)</label>
+                        <input type="file" class="form-control" id="postMediaInput" multiple accept="image/*,video/*">
+                        <div class="form-text">Simpan offline dulu. Upload ke Drive saat Sync.</div>
+
+                        <div class="mt-3">
+                          <div class="fw-semibold mb-2">Preview</div>
+                          <div id="mediaPreview" class="media-preview"></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                      <button class="btn btn-outline-secondary rounded-pill" id="btnResetPost">
+                        Reset
+                      </button>
+                      <button class="btn btn-primary rounded-pill" id="btnSavePost">
+                        <i class="bi bi-save"></i> Simpan (Offline)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Private Report -->
+              <div class="tab-pane fade" id="tabPrivateReport">
+                <div class="card border-0 shadow-sm rounded-4">
+                  <div class="card-body">
+                    <div class="row g-3">
+                      <div class="col-12 col-lg-4">
+                        <label class="form-label">Tanggal</label>
+                        <input type="date" class="form-control" id="repDate">
+                        <label class="form-label mt-2">Jenis Kegiatan</label>
+                        <input class="form-control" id="repType" placeholder="Contoh: Evaluasi Program, Meeting, Inspeksi">
+                      </div>
+                      <div class="col-12 col-lg-8">
+                        <label class="form-label">Detail Laporan (Privat)</label>
+                        <textarea class="form-control" id="repDetail" rows="6" placeholder="Catatan internal…"></textarea>
+                      </div>
+                    </div>
+
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                      <button class="btn btn-outline-secondary rounded-pill" id="btnResetReport">Reset</button>
+                      <button class="btn btn-primary rounded-pill" id="btnSaveReport">
+                        <i class="bi bi-lock"></i> Simpan Laporan Privat
+                      </button>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                      <div class="fw-bold">Daftar Laporan Privat</div>
+                      <button class="btn btn-outline-primary btn-sm rounded-pill" id="btnRefreshReports">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                      </button>
+                    </div>
+                    <div id="reportList" class="vstack gap-2"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Moderation -->
+              <div class="tab-pane fade" id="tabModeration">
+                <div class="card border-0 shadow-sm rounded-4">
+                  <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                      <div class="fw-bold">Komentar Terbaru</div>
+                      <button class="btn btn-outline-primary btn-sm rounded-pill" id="btnRefreshModeration">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                      </button>
+                    </div>
+                    <div id="modList" class="vstack gap-2"></div>
+                    <div class="small text-muted mt-2">
+                      Moderasi bekerja offline juga. Perubahan akan ikut tersinkron saat Sync.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Sync -->
+              <div class="tab-pane fade" id="tabSync">
+                <div class="card border-0 shadow-sm rounded-4">
+                  <div class="card-body">
+                    <div class="row g-3">
+                      <div class="col-12 col-lg-7">
+                        <div class="fw-bold mb-2">Sync Center</div>
+                        <div class="alert alert-soft">
+                          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                            <div>
+                              <div class="fw-semibold">Google Apps Script Web App URL</div>
+                              <div class="small text-muted">Tempel URL deploy (akhiran /exec)</div>
+                            </div>
+                            <button class="btn btn-outline-secondary btn-sm rounded-pill" id="btnTestGAS">
+                              <i class="bi bi-patch-check"></i> Test
+                            </button>
+                          </div>
+                          <input class="form-control mt-2" id="gasUrlInput" readonly>
+                          <div class="form-text">URL GAS sudah ditetapkan.</div>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                          <button class="btn btn-primary rounded-pill" id="btnSyncAdmin">
+                            <i class="bi bi-cloud-arrow-up"></i> Sync Sekarang
+                          </button>
+                          <button class="btn btn-outline-secondary rounded-pill" id="btnPullLatest">
+                            <i class="bi bi-cloud-download"></i> Ambil Data Publik Terbaru
+                          </button>
+                        </div>
+
+                        <div class="mt-3">
+                          <div class="fw-semibold">Log</div>
+                          <div class="logbox" id="syncLog"></div>
+                        </div>
+                      </div>
+
+                      <div class="col-12 col-lg-5">
+                        <div class="fw-bold mb-2">Statistik Publik</div>
+                        <div class="stat-card mb-2">
+                          <div class="text-muted small">Total Kunjungan</div>
+                          <div class="fs-3 fw-bold" id="adminVisitTotal">—</div>
+                        </div>
+                        <div class="stat-card mb-2">
+                          <div class="text-muted small">Posting Publik</div>
+                          <div class="fs-3 fw-bold" id="adminPostCount">—</div>
+                        </div>
+                        <div class="stat-card">
+                          <div class="text-muted small">Komentar</div>
+                          <div class="fs-3 fw-bold" id="adminCommentCount">—</div>
+                        </div>
+                        <div class="small text-muted mt-2">
+                          Total kunjungan dihitung unik per perangkat per hari (anti spam sederhana).
+                        </div>
+                      </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <div class="fw-bold mb-2">Ganti Password Admin</div>
+                    <div class="row g-2">
+                      <div class="col-12 col-lg-4">
+                        <input type="password" class="form-control" id="newPass1" placeholder="Password baru">
+                      </div>
+                      <div class="col-12 col-lg-4">
+                        <input type="password" class="form-control" id="newPass2" placeholder="Ulangi password">
+                      </div>
+                      <div class="col-12 col-lg-4 d-grid">
+                        <button class="btn btn-outline-primary rounded-pill" id="btnChangeAdminPass">
+                          <i class="bi bi-key"></i> Ganti Password
+                        </button>
+                      </div>
+                    </div>
+                    <div class="small text-muted mt-2">
+                      Menggunakan PBKDF2 (WebCrypto) + salt. Tidak menyimpan password asli.
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="toast align-items-center text-bg-dark border-0 rounded-pill" role="alert">
+      <div class="d-flex">
+        <div class="toast-body" id="toastText">—</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
