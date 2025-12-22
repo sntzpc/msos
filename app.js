@@ -285,6 +285,41 @@
     await refreshStats();
   }
 
+  // =============================
+// ✅ Public outbox (Komentar publik) - TANPA ADMIN
+// =============================
+async function flushPublicCommentOutbox({ silent = true } = {}) {
+  const base = getGasUrlHardcoded();
+  if (!navigator.onLine || !base) return;
+
+  // ambil queued items khusus komentar publik
+  const all = await idbAll("sync_queue");
+  const items = all.filter(x => x.status === "queued" && x.type === "publicAddComment");
+
+  if (!items.length) return;
+
+  for (const item of items) {
+    try {
+      const c = await idbGet("comments", item.payload.commentId);
+      if (!c) {
+        await queueSetStatus(item.id, "done");
+        continue;
+      }
+
+      // kirim ke server (langsung addComment)
+      await gasFetch("addComment", { comment: c }, "POST");
+
+      // tandai komentar sudah tersinkron otomatis
+      await idbPut("comments", { ...c, syncedAt: nowISO(), updatedAt: nowISO() });
+
+      await queueSetStatus(item.id, "done");
+    } catch (e) {
+      await queueSetStatus(item.id, "error", String(e?.message || e));
+      if (!silent) showToast("Gagal kirim komentar: " + (e?.message || e));
+    }
+  }
+}
+
   // ----------------------------
   // Visits (public view counter)
   // ----------------------------
@@ -359,18 +394,37 @@
 
   async function addCommentLocal(postId, name, text) {
     const c = {
-      id: uid(),
-      postId,
-      name: name.trim(),
-      text: text.trim(),
-      createdAt: nowISO(),
-      updatedAt: nowISO(),
-      status: "active"
+        id: uid(),
+        postId,
+        name: name.trim(),
+        text: text.trim(),
+        createdAt: nowISO(),
+        updatedAt: nowISO(),
+        status: "active",
+        syncedAt: "" // kosong jika belum terkirim
     };
+
+    // 1) Simpan lokal dulu (UX cepat)
     await idbPut("comments", c);
-    await queueAdd("addComment", { commentId: c.id });
+
+    // 2) Kalau online → langsung kirim ke GAS (tanpa admin)
+    const base = getGasUrlHardcoded();
+    if (navigator.onLine && base) {
+        try {
+        await gasFetch("addComment", { comment: c }, "POST");
+        await idbPut("comments", { ...c, syncedAt: nowISO(), updatedAt: nowISO() });
+        return c;
+        } catch (e) {
+        // fallback: masuk outbox publik (tetap tanpa admin, auto-flush saat online)
+        await queueAdd("publicAddComment", { commentId: c.id });
+        return c;
+        }
+    }
+
+    // 3) Offline → masuk outbox publik
+    await queueAdd("publicAddComment", { commentId: c.id });
     return c;
-  }
+    }
 
   async function setCommentStatusLocal(commentId, status) {
     const c = await idbGet("comments", commentId);
@@ -651,6 +705,11 @@
           if (c) await gasFetch("addComment", { comment: c }, "POST");
         }
 
+        if (item.type === "publicAddComment") {
+        const c = await idbGet("comments", item.payload.commentId);
+        if (c) await gasFetch("addComment", { comment: c }, "POST");
+        }
+
         if (item.type === "setCommentStatus") {
           await gasFetch("setCommentStatus", item.payload, "POST");
         }
@@ -875,6 +934,29 @@
     }
   }
 
+    // =============================
+    // ✅ Pull komentar terbaru per post (ringan)
+    // =============================
+    async function pullCommentsForPost(postId, { limit = 200, silent = true } = {}) {
+    const base = getGasUrlHardcoded();
+    if (!navigator.onLine || !base) return { count: 0 };
+
+    try {
+        const data = await gasFetch("publicCommentsByPost", { postId, limit }, "POST");
+        const comments = data.comments || [];
+
+        // upsert ke IDB agar renderComments() otomatis pakai data terbaru
+        for (const c of comments) {
+        await idbPut("comments", c);
+        }
+
+        return { count: comments.length };
+    } catch (e) {
+        if (!silent) showToast("Gagal cek komentar terbaru: " + (e?.message || e));
+        return { count: 0, error: e };
+    }
+    }
+
   async function openPostModal(postId) {
     const post = await idbGet("posts", postId);
     if (!post) return;
@@ -920,27 +1002,38 @@
       }
     }
 
-    await renderComments(postId);
+            // ✅ Saat modal dibuka: cek komentar terbaru khusus post ini (ringan)
+        try { await flushPublicCommentOutbox({ silent: true }); } catch {}
+        await pullCommentsForPost(postId, { limit: 200, silent: true });
+        await renderComments(postId);
 
     $("#btnSendComment").onclick = async () => {
-      const name = getViewerName();
-      if (!name) {
-        showToast("Isi nama dulu.");
-        openViewerModal();
-        return;
-      }
-      const text = ($("#commentText").value || "").trim();
-      if (!text) { showToast("Komentar masih kosong."); return; }
-      $("#btnSendComment").disabled = true;
-      try {
-        await addCommentLocal(postId, name, text);
-        $("#commentText").value = "";
-        await renderComments(postId);
-        showToast("Komentar tersimpan (offline).");
-      } finally {
-        $("#btnSendComment").disabled = false;
-      }
-    };
+        const name = getViewerName();
+        if (!name) {
+            showToast("Isi nama dulu.");
+            openViewerModal();
+            return;
+        }
+
+        const text = ($("#commentText").value || "").trim();
+        if (!text) { showToast("Komentar masih kosong."); return; }
+
+        $("#btnSendComment").disabled = true;
+        try {
+            await addCommentLocal(postId, name, text);
+            $("#commentText").value = "";
+            await renderComments(postId);
+
+            // Kalau online biasanya langsung terkirim
+            if (navigator.onLine) {
+            showToast("Komentar terkirim ✅");
+            } else {
+            showToast("Offline: komentar tersimpan, akan terkirim otomatis saat online.");
+            }
+        } finally {
+            $("#btnSendComment").disabled = false;
+        }
+        };
 
     $("#btnChangeNameInline").onclick = () => openViewerModal();
 
@@ -979,21 +1072,26 @@
     }
   }
 
+  function setText(sel, val) {
+    const el = $(sel);
+    if (el) el.textContent = String(val);
+    }
+
   async function refreshStats() {
-    const postCount = (await idbAll("posts")).filter(p => p.isPublished).length;
-    const commentCount = (await idbAll("comments")).filter(c => c.status !== "hidden").length;
-    const qCount = (await idbAll("sync_queue")).filter(x => x.status === "queued").length;
+  const postCount = (await idbAll("posts")).filter(p => p.isPublished).length;
+  const commentCount = (await idbAll("comments")).filter(c => c.status !== "hidden").length;
+  const qCount = (await idbAll("sync_queue")).filter(x => x.status === "queued").length;
 
-    $("#statPosts").textContent = String(postCount);
-    $("#statComments").textContent = String(commentCount);
-    $("#statQueue").textContent = String(qCount);
+  setText("#statPosts", postCount);
+  setText("#statComments", commentCount);
+  setText("#statQueue", qCount);
 
-    const visitTotalRec = await idbGet("stats", "visitTotal");
-    const visitTotal = visitTotalRec?.value ?? "—";
-    $("#visitTotal").textContent = String(visitTotal);
+  const visitTotalRec = await idbGet("stats", "visitTotal");
+  const visitTotal = visitTotalRec?.value ?? "—";
+  setText("#visitTotal", visitTotal);
 
-    $("#syncStatus").textContent = qCount ? "Ada antrian" : "Rapi";
-  }
+  setText("#syncStatus", qCount ? "Ada antrian" : "Rapi");
+}
 
   async function refreshUI() {
     await refreshStats();
@@ -1131,10 +1229,14 @@
   // ----------------------------
   function setOnlineUI() {
     const online = navigator.onLine;
-    $("#onlineText").textContent = online ? "Online" : "Offline";
-    $("#dotOnline").style.background = online ? "#20c997" : "#adb5bd";
-    $("#dotOnline").style.boxShadow = online ? "0 0 0 5px rgba(32,201,151,.18)" : "0 0 0 5px rgba(173,181,189,.18)";
-  }
+    const t = $("#onlineText");
+    const d = $("#dotOnline");
+    if (t) t.textContent = online ? "Online" : "Offline";
+    if (d) {
+        d.style.background = online ? "#20c997" : "#adb5bd";
+        d.style.boxShadow = online ? "0 0 0 5px rgba(32,201,151,.18)" : "0 0 0 5px rgba(173,181,189,.18)";
+    }
+    }
 
   async function refreshPublicStatsIfPossible() {
     const base = getGasUrlHardcoded();
@@ -1180,7 +1282,15 @@
 
     // UI
     setOnlineUI();
-    window.addEventListener("online", async () => { setOnlineUI(); await refreshPublicStatsIfPossible(); });
+
+    // ✅ Saat online: update stats + auto-kirim komentar pending (tanpa admin)
+    window.addEventListener("online", async () => {
+    setOnlineUI();
+    await refreshPublicStatsIfPossible();
+    try { await flushPublicCommentOutbox({ silent: true }); } catch {}
+    });
+
+    // Saat offline: hanya update indikator
     window.addEventListener("offline", () => setOnlineUI());
 
     // header buttons
@@ -1435,18 +1545,23 @@
       }
     };
 
-       await refreshPublicStatsIfPossible();
+    await refreshPublicStatsIfPossible();
+
+    // ✅ coba flush outbox komentar sekali saat init (kalau sudah online)
+    try { await flushPublicCommentOutbox({ silent: true }); } catch {}
 
     // Jika cache masih kosong, ambil batch pertama (3 hari) saat online
     const localPosts = await idbAll("posts");
-    if (!localPosts.length && navigator.onLine) {
-      // mulai dari hari ini
-      localStorage.setItem(CURSOR_KEY, ymd(new Date()));
-      await pullPublicLatest({ resetCursor: false });
-    } else {
-      await autoPullPublicIfNeeded(); // tetap throttle 10 menit kalau mau
-      await refreshUI();
-    }
+    const localComments = await idbAll("comments");
+
+        // Jika cache masih kosong, ambil batch pertama (3 hari) saat online
+        if ((!localPosts.length || !localComments.length) && navigator.onLine) {
+        localStorage.setItem(CURSOR_KEY, ymd(new Date()));
+        await pullPublicLatest({ resetCursor: false });
+        } else {
+        await autoPullPublicIfNeeded(); // throttle 10 menit
+        await refreshUI();
+        }
 
     // Infinite scroll
     window.addEventListener("scroll", () => {
