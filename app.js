@@ -173,11 +173,34 @@
   // Toast
   // ----------------------------
   const toastEl = $("#toast");
-  const toast = toastEl ? new bootstrap.Toast(toastEl, { delay: 2500 }) : null;
-  function showToast(msg) {
-    if ($("#toastText")) $("#toastText").textContent = msg;
-    toast?.show();
-  }
+
+    // default toast (auto hide)
+    let toast = toastEl ? new bootstrap.Toast(toastEl, { delay: 2500, autohide: true }) : null;
+
+    function showToast(msg, opts = {}) {
+    const { sticky = false, delay = 2500 } = opts || {};
+    if (!toastEl) return;
+
+    const txt = $("#toastText");
+    if (txt) txt.textContent = msg;
+
+    // sticky toast: tidak auto-hide
+    if (sticky) {
+        toast = new bootstrap.Toast(toastEl, { autohide: false, delay: 999999 });
+    } else {
+        toast = new bootstrap.Toast(toastEl, { autohide: true, delay });
+    }
+    toast.show();
+    }
+
+    function hideToast() {
+    try { toast?.hide(); } catch {}
+    }
+
+    // helper progress: update toast tetap tampil
+    function progressToast(msg) {
+    showToast(msg, { sticky: true });
+    }
 
   // ----------------------------
   // Crypto (PBKDF2)
@@ -599,6 +622,143 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
     showToast(`Data ditambah: ${posts.length} post (${data.range?.fromDay || "?"}..${data.range?.toDay || "?"})`);
   }
 
+  // =============================
+// ✅ Helper: bangun index lokal (id -> updatedAt) untuk dedupe cepat
+// =============================
+async function buildLocalIndexMap(storeName, idField = "id", updatedField = "updatedAt") {
+  const all = await idbAll(storeName);
+  const map = new Map();
+  for (const x of all) {
+    const id = (x && x[idField]) ? String(x[idField]) : "";
+    if (!id) continue;
+    map.set(id, String(x[updatedField] || ""));
+  }
+  return map;
+}
+
+// =============================
+// ✅ Helper: upsert dengan hitung "baru/updated"
+// =============================
+async function upsertManyWithCount(storeName, items, localMap) {
+  let insertedOrUpdated = 0;
+  for (const it of (items || [])) {
+    if (!it?.id) continue;
+    const id = String(it.id);
+    const incomingUpd = String(it.updatedAt || "");
+
+    const existedUpd = localMap.get(id) || null;
+    // jika belum ada => insert
+    // jika ada tapi updatedAt beda (lebih baru / beda) => update
+    if (!existedUpd || (incomingUpd && incomingUpd !== existedUpd)) {
+      await idbPut(storeName, it);
+      localMap.set(id, incomingUpd);
+      insertedOrUpdated++;
+    }
+  }
+  return insertedOrUpdated;
+}
+
+// =============================
+// ✅ Pull paged: ambil berkali-kali sampai tidak ada data baru
+// =============================
+async function refreshPullMissingFromServer({
+    daysPerBatch = PUBLIC_PAGE_DAYS,
+    maxBatches = 20,
+    resetCursor = true,
+    // mode full: lanjut sampai mentok (data kosong / no next), bukan stop saat "no new"
+    full = false,
+    onProgress = null // (info)=>void
+    } = {}) {
+    const base = getGasUrlHardcoded();
+    if (!base) throw new Error("GAS_URL belum diisi di app.js.");
+    if (!navigator.onLine) throw new Error("Sedang offline.");
+
+    // bangun index lokal (sekali saja)
+    const postMap = await buildLocalIndexMap("posts", "id", "updatedAt");
+    const commentMap = await buildLocalIndexMap("comments", "id", "updatedAt");
+
+    // reset cursor => mulai dari hari ini
+    if (resetCursor) localStorage.setItem(CURSOR_KEY, ymd(new Date()));
+
+    let totalNewPosts = 0;
+    let totalNewComments = 0;
+    let batchesUsed = 0;
+
+    for (let i = 0; i < maxBatches; i++) {
+        const beforeDay = (localStorage.getItem(CURSOR_KEY) || ymd(new Date())).trim();
+        batchesUsed = i + 1;
+
+        const infoStart = {
+        phase: "batch_start",
+        batch: i + 1,
+        maxBatches,
+        daysPerBatch,
+        beforeDay,
+        totalNewPosts,
+        totalNewComments
+        };
+        try { onProgress && onProgress(infoStart); } catch {}
+
+        log(`Refresh Pull: batch ${i + 1}/${maxBatches} • ${daysPerBatch} hari (s.d. ${beforeDay})...`);
+
+        const data = await gasFetch("publicDumpDays", { beforeDay, days: daysPerBatch }, "POST");
+
+        const posts = data.posts || [];
+        const comments = data.comments || [];
+
+        const addedPosts = await upsertManyWithCount("posts", posts, postMap);
+        const addedComments = await upsertManyWithCount("comments", comments, commentMap);
+
+        totalNewPosts += addedPosts;
+        totalNewComments += addedComments;
+
+        // stats
+        if (typeof data.visitTotal === "number") {
+        await idbPut("stats", { key: "visitTotal", value: data.visitTotal, updatedAt: nowISO() });
+        }
+
+        // cursor mundur
+        if (data.nextBeforeDay) {
+        localStorage.setItem(CURSOR_KEY, String(data.nextBeforeDay));
+        } else {
+        localStorage.setItem(CURSOR_KEY, addDaysYmd(beforeDay, -daysPerBatch));
+        }
+
+        const infoEnd = {
+        phase: "batch_end",
+        batch: i + 1,
+        maxBatches,
+        beforeDay,
+        gotPosts: posts.length,
+        gotComments: comments.length,
+        addedPosts,
+        addedComments,
+        totalNewPosts,
+        totalNewComments,
+        nextBeforeDay: data.nextBeforeDay || ""
+        };
+        try { onProgress && onProgress(infoEnd); } catch {}
+
+        // ✅ STOP rules:
+        // - mode normal: stop kalau tidak ada penambahan (local sudah lengkap untuk range itu)
+        // - mode full: stop kalau server sudah tidak ada data (posts+comments kosong) ATAU tidak ada nextBeforeDay (anggap sudah mentok)
+        if (!full) {
+        if (addedPosts === 0 && addedComments === 0) {
+            log("Refresh Pull: tidak ada data baru di batch ini → stop.");
+            break;
+        }
+        } else {
+        if ((posts.length === 0 && comments.length === 0) || !data.nextBeforeDay) {
+            log("Refresh Pull (FULL): data kosong / tidak ada nextBeforeDay → stop.");
+            break;
+        }
+        }
+    }
+
+    await refreshUI();
+    return { totalNewPosts, totalNewComments, batchesUsed };
+    }
+
   async function autoPullPublicIfNeeded() {
     const base = getGasUrlHardcoded();
     if (!navigator.onLine || !base) return;
@@ -748,6 +908,23 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
     showToast("Sync selesai.");
   }
 
+  // =============================
+  // ✅ Pending comment draft (auto-send setelah isi nama)
+  // =============================
+    let pendingCommentDraft = null; 
+    // { postId, text }
+
+    let viewerModalOnSaved = null; // callback setelah nama tersimpan
+
+    function openViewerModal(opts = {}) {
+    // patch: dukung callback setelah save
+    viewerModalOnSaved = typeof opts.onSaved === "function" ? opts.onSaved : null;
+
+    $("#viewerNameInput").value = getViewerName();
+    const m = new bootstrap.Modal($("#viewerModal"));
+    m.show();
+    }
+
   // ----------------------------
   // UI Rendering
   // ----------------------------
@@ -771,13 +948,115 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
     }
 
     function driveIdFromUrl(u) {
+    const s = String(u || "").trim();
+    if (!s) return "";
+
+    // 1) query param ?id=...
     try {
-        const url = new URL(u);
-        return url.searchParams.get("id") || "";
+        const url = new URL(s);
+        const qid = url.searchParams.get("id");
+        if (qid) return qid;
+
+        // 2) pattern /d/<ID> (lh3.googleusercontent.com/d/<ID>=w1200)
+        //    atau drive.google.com/file/d/<ID>/view
+        const m1 = url.pathname.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+        if (m1 && m1[1]) return m1[1];
+
+        // 3) pattern /uc?...&id=<ID> kadang tidak lewat searchParams (fallback regex)
+        const m2 = (url.href || "").match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+        if (m2 && m2[1]) return m2[1];
     } catch {
-        const m = String(u || "").match(/[?&]id=([^&]+)/);
-        return m ? decodeURIComponent(m[1]) : "";
+        // ignore
     }
+
+    // regex fallback untuk string non-URL valid
+    const m = s.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+    if (m && m[1]) return m[1];
+
+    const m2 = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+    if (m2 && m2[1]) return m2[1];
+
+    return "";
+    }
+
+    function isLh3GoogleUsercontent(url) {
+  const s = String(url || "");
+  return s.includes("lh3.googleusercontent.com");
+}
+
+function buildMediaCandidates(mediaItem, { preferFull = false, sz = "w1200" } = {}) {
+  if (!mediaItem) return [];
+
+  // video: pakai url/uc view
+  if (mediaItem.type === "video") {
+    const arr = [];
+    if ((mediaItem.url || "").trim()) arr.push(mediaItem.url.trim());
+    if ((mediaItem.driveFileId || "").trim()) arr.push(driveViewUrl(mediaItem.driveFileId.trim()));
+    return arr;
+  }
+
+  // image:
+  const url = (mediaItem.url || "").trim();
+  const thumbUrl = (mediaItem.thumbUrl || "").trim();
+  const fid = (mediaItem.driveFileId || "").trim();
+
+  const fromId = fid ? driveThumbUrl(fid, sz) : "";
+  const ucFull = fid ? driveViewUrl(fid) : "";
+
+  // urutan kandidat:
+  // - kalau thumbUrl adalah lh3, sering “abort” di Firefox → jangan jadi satu-satunya.
+  // - always include drive thumbnail as strong fallback jika ada driveFileId
+  const primary = [];
+    if (preferFull) {
+        if (url) primary.push(url);
+        if (thumbUrl) primary.push(thumbUrl);
+    } else {
+        if (thumbUrl) primary.push(thumbUrl);
+        if (url) primary.push(url);
+    }
+
+    const candidates = [];
+    for (const x of primary) candidates.push(x);
+
+    if (fromId) candidates.push(fromId);
+    if (ucFull) candidates.push(ucFull);
+
+    // dedupe
+    return Array.from(new Set(candidates.filter(Boolean)));
+    }
+
+    function attachImgFallback(img, candidates, { timeoutMs = 4500 } = {}) {
+    if (!img || !candidates?.length) return;
+
+    let idx = 0;
+    let timer = null;
+
+    const cleanup = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+    const tryNext = () => {
+        cleanup();
+        idx++;
+        if (idx >= candidates.length) return;
+        img.src = candidates[idx];
+
+        // timeout fallback (untuk kasus NS_BINDING_ABORTED / tidak trigger onerror)
+        timer = setTimeout(() => {
+        // kalau belum tampil (naturalWidth==0), paksa next
+        if (!img.complete || img.naturalWidth === 0) {
+            tryNext();
+        }
+        }, timeoutMs);
+    };
+
+    img.onerror = () => tryNext();
+
+    // start candidate 0
+    img.src = candidates[0];
+    timer = setTimeout(() => {
+        if (!img.complete || img.naturalWidth === 0) {
+        tryNext();
+        }
+    }, timeoutMs);
     }
 
     function driveThumbUrl(id, sz = "w1200") {
@@ -884,7 +1163,7 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
       let coverHtml = `<div class="post-cover d-flex align-items-center justify-content-center text-muted">No media</div>`;
 
       if (cover.kind !== "none") {
-        coverHtml = `<img class="post-cover" data-post="${p.id}" alt="" loading="lazy" decoding="async" src="${cover.src || ""}">`;
+        coverHtml = `<img class="post-cover" data-post="${p.id}" alt="" loading="lazy" decoding="async">`;
       }
 
       const card = document.createElement("div");
@@ -907,30 +1186,37 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
       feed.appendChild(card);
 
       // Fallback khusus Drive: kalau uc?export=view sering "abort", pindah ke thumbnail endpoint
-        const imgEl = card.querySelector(`img[data-post="${p.id}"]`);
-        if (imgEl) {
-        imgEl.onerror = () => {
-            const cur = imgEl.getAttribute("src") || "";
-            const first = (p.media || [])[0] || {};
-            const id = first.driveFileId || driveIdFromUrl(cur);
+        const imgEl = card.querySelector(`img.post-cover[data-post="${p.id}"]`);
+            if (imgEl) {
+            const first = (p.media || [])[0] || null;
 
-            if (!id) return;
+            // 1) kalau cover.src ada (thumbUrl/url), pakai itu sebagai kandidat awal
+            // 2) tambahkan fallback dari driveFileId / uc view
+            const fid = (first?.driveFileId || driveIdFromUrl(cover.src) || "").trim();
 
-            const fallback = driveThumbUrl(id, "w1200");
-            if (cur !== fallback) {
-            imgEl.src = fallback;
+            const tempMedia = first ? { ...first, driveFileId: first.driveFileId || fid } : null;
+
+            // kandidat: (thumb/url dari server) -> drive thumbnail -> uc view
+            const candidates = [];
+
+            if ((cover.src || "").trim()) candidates.push(cover.src.trim());
+            if (tempMedia) {
+                for (const u of buildMediaCandidates(tempMedia, { preferFull: false, sz: "w1200" })) {
+                candidates.push(u);
+                }
             }
-        };
-        }
 
-      if (cover.kind !== "none" && !cover.src) {
-        const img = card.querySelector(`img[data-post="${p.id}"]`);
+            attachImgFallback(imgEl, Array.from(new Set(candidates.filter(Boolean))), { timeoutMs: 4500 });
+            }
+
+            if (cover.kind !== "none" && !cover.src) {
+        const img = card.querySelector(`img.post-cover[data-post="${p.id}"]`);
         if (img) {
-          const first = (p.media || [])[0];
-          const url = await resolveLocalUrl(first);
-          if (url) img.src = url;
+            const first = (p.media || [])[0];
+            const url = await resolveLocalUrl(first);
+            if (url) attachImgFallback(img, [url], { timeoutMs: 4500 });
         }
-      }
+        }
     }
   }
 
@@ -988,15 +1274,14 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
         img.loading = "lazy";
         img.decoding = "async";
         img.alt = "";
-        img.src = src;
+        // kandidat berlapis untuk modal (lebih besar)
+        const fid = (m.driveFileId || driveIdFromUrl(src) || "").trim();
+        const mm = { ...m, driveFileId: fid };
 
-        // fallback bila url "uc?export=view" error => pakai thumbnail endpoint
-        img.onerror = () => {
-          const id = (m.driveFileId || driveIdFromUrl(img.src) || "").trim();
-          if (!id) return;
-          const fb = driveThumbUrl(id, "w1600");
-          if (img.src !== fb) img.src = fb;
-        };
+        const candidates = buildMediaCandidates(mm, { preferFull: true, sz: "w1600" });
+        if (src) candidates.unshift(src); // pastikan src awal ikut dicoba dulu
+
+        attachImgFallback(img, Array.from(new Set(candidates.filter(Boolean))), { timeoutMs: 5500 });
 
         stack.appendChild(img);
       }
@@ -1008,15 +1293,21 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
         await renderComments(postId);
 
     $("#btnSendComment").onclick = async () => {
-        const name = getViewerName();
-        if (!name) {
-            showToast("Isi nama dulu.");
-            openViewerModal();
-            return;
-        }
-
         const text = ($("#commentText").value || "").trim();
         if (!text) { showToast("Komentar masih kosong."); return; }
+
+        const name = getViewerName();
+        if (!name) {
+            // ✅ simpan draft -> setelah nama disimpan, auto terkirim
+            pendingCommentDraft = { postId, text };
+            showToast("Isi nama dulu, lalu komentar akan langsung terkirim.");
+            openViewerModal({
+            onSaved: () => {
+                // tidak perlu apa-apa di sini, karena btnSaveViewerName sudah auto-send draft
+            }
+            });
+            return;
+        }
 
         $("#btnSendComment").disabled = true;
         try {
@@ -1024,12 +1315,8 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
             $("#commentText").value = "";
             await renderComments(postId);
 
-            // Kalau online biasanya langsung terkirim
-            if (navigator.onLine) {
-            showToast("Komentar terkirim ✅");
-            } else {
-            showToast("Offline: komentar tersimpan, akan terkirim otomatis saat online.");
-            }
+            if (navigator.onLine) showToast("Komentar terkirim ✅");
+            else showToast("Offline: komentar tersimpan, akan terkirim otomatis saat online.");
         } finally {
             $("#btnSendComment").disabled = false;
         }
@@ -1296,14 +1583,14 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
     // header buttons
     $("#btnViewerName").onclick = openViewerModal;
         $("#btnSaveViewerName").onclick = async () => {
-      const v = ($("#viewerNameInput").value || "").trim();
-      if (!v) { showToast("Nama tidak boleh kosong."); return; }
+    const v = ($("#viewerNameInput").value || "").trim();
+    if (!v) { showToast("Nama tidak boleh kosong."); return; }
 
-      setViewerName(v);
+    setViewerName(v);
 
-      // log event ke queue (akan tersinkron saat admin Sync)
-      const sess = getSession();
-      await queueAdd("eventLog", {
+    // log event ke queue (akan tersinkron saat admin Sync)
+    const sess = getSession();
+    await queueAdd("eventLog", {
         type: "viewer_name_set",
         sessionId: sess.sessionId,
         expiresAt: sess.expiresAt,
@@ -1313,10 +1600,41 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
         detail: "",
         ts: nowISO(),
         ua: navigator.userAgent.slice(0, 120)
-      });
+    });
 
-      showToast("Nama disimpan.");
-      bootstrap.Modal.getInstance($("#viewerModal"))?.hide();
+    showToast("Nama disimpan.");
+    bootstrap.Modal.getInstance($("#viewerModal"))?.hide();
+
+    // ✅ jika ada callback setelah save
+    try { viewerModalOnSaved && viewerModalOnSaved(v); } catch(e) { console.warn(e); }
+    viewerModalOnSaved = null;
+
+    // ✅ jika ada draft komentar pending -> auto kirim
+    if (pendingCommentDraft?.postId && pendingCommentDraft?.text) {
+        const { postId, text } = pendingCommentDraft;
+        pendingCommentDraft = null;
+
+        try {
+        // tombol kirim mungkin ada jika postModal sedang terbuka
+        const btn = $("#btnSendComment");
+        if (btn) btn.disabled = true;
+
+        await addCommentLocal(postId, v, text);
+
+        const ta = $("#commentText");
+        if (ta) ta.value = "";
+
+        await renderComments(postId);
+
+        if (navigator.onLine) showToast("Komentar terkirim ✅");
+        else showToast("Offline: komentar tersimpan, akan terkirim otomatis saat online.");
+        } catch (e) {
+        showToast("Gagal kirim komentar: " + (e?.message || e));
+        } finally {
+        const btn = $("#btnSendComment");
+        if (btn) btn.disabled = false;
+        }
+    }
     };
 
     $("#btnAdmin").onclick = () => {
@@ -1326,18 +1644,88 @@ async function flushPublicCommentOutbox({ silent = true } = {}) {
     };
 
     $("#btnRefresh").onclick = async () => {
-      try {
+    try {
         if (navigator.onLine) {
-          // mulai dari 3 hari terbaru lagi (cursor reset)
-          await pullPublicLatest({ resetCursor: true });
+        // ✅ ambil data yang belum ada di local (loop paging)
+        const r = await refreshPullMissingFromServer({
+            daysPerBatch: PUBLIC_PAGE_DAYS,
+            maxBatches: 20,
+            resetCursor: true
+        });
+        showToast(`Refresh OK ✅ +${r.totalNewPosts} post, +${r.totalNewComments} komentar`);
         } else {
-          await refreshUI();
+        await refreshUI();
+        showToast("Refresh offline.");
         }
-        showToast(navigator.onLine ? "Update: ambil 3 hari terbaru." : "Refresh offline.");
-      } catch (e) {
+    } catch (e) {
         showToast("Refresh gagal: " + (e.message || e));
-      }
+    }
     };
+
+    // =============================
+    // ✅ Opsi: Refresh total sampai paling lama (maxBatches 200) + progress toast/log
+    // =============================
+(function attachRefreshAllOption(){
+    const btnRefresh = $("#btnRefresh");
+    if (!btnRefresh) return;
+
+    // Jika HTML belum punya tombolnya, buat otomatis
+    let btnAll = $("#btnRefreshAll");
+    if (!btnAll) {
+        btnAll = document.createElement("button");
+        btnAll.id = "btnRefreshAll";
+        btnAll.type = "button";
+        btnAll.className = btnRefresh.className; // ikut style tombol refresh
+        btnAll.innerHTML = `<i class="bi bi-arrow-repeat"></i> Refresh Total`;
+        btnAll.title = "Refresh total sampai paling lama (max 200 batch)";
+        btnRefresh.insertAdjacentElement("afterend", btnAll);
+    }
+
+    btnAll.onclick = async () => {
+        if (!navigator.onLine) {
+        await refreshUI();
+        showToast("Offline: tidak bisa Refresh Total.");
+        return;
+        }
+
+        // progress toast sticky
+        progressToast("Refresh Total: mulai…");
+
+        btnAll.disabled = true;
+        try {
+        const r = await refreshPullMissingFromServer({
+            daysPerBatch: PUBLIC_PAGE_DAYS,
+            maxBatches: 200,
+            resetCursor: true,
+            full: true,
+            onProgress: (info) => {
+            if (!info) return;
+
+            if (info.phase === "batch_start") {
+                progressToast(`Refresh Total: batch ${info.batch}/${info.maxBatches} • s.d. ${info.beforeDay}`);
+            }
+
+            if (info.phase === "batch_end") {
+                // tampilkan ringkas: batch selesai + akumulasi
+                const msg =
+                `Refresh Total: batch ${info.batch}/${info.maxBatches} selesai • ` +
+                `+${info.addedPosts} post, +${info.addedComments} komentar (total +${info.totalNewPosts}/+${info.totalNewComments})`;
+                log(msg);
+                progressToast(msg);
+            }
+            }
+        });
+
+        hideToast();
+        showToast(`Refresh Total selesai ✅ +${r.totalNewPosts} post, +${r.totalNewComments} komentar (batches ${r.batchesUsed})`, { delay: 4000 });
+        } catch (e) {
+        hideToast();
+        showToast("Refresh Total gagal: " + (e?.message || e));
+        } finally {
+        btnAll.disabled = false;
+        }
+    };
+    })();
 
     $("#btnOpenFeed").onclick = () => window.scrollTo({ top: $("#feed").offsetTop - 80, behavior: "smooth" });
 

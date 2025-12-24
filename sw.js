@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v9";
+const CACHE_VERSION = "v11";
 const CACHE_NAME = `tc-activity-${CACHE_VERSION}`;
 
 const ASSETS = [
